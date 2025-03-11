@@ -1,4 +1,3 @@
-Setting up PyTorch plugin "bias_act_plugin"... Failed!
 Setting up PyTorch plugin "upfirdn2d_plugin"... Failed!
 Setting up PyTorch plugin "upfirdn2d_plugin"... Failed!
 Setting up PyTorch plugin "upfirdn2d_plugin"... Failed!

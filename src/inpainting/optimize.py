@@ -1,6 +1,15 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+import copy
+import matplotlib.pyplot as plt
+from IPython.display import clear_output, display
+
+from torch.amp import autocast, GradScaler
+import sys
+sys_stdout = sys.stdout
+
+scaler = GradScaler()
 
 
 
@@ -9,19 +18,14 @@ def project(
     target: torch.Tensor, # [C,H,W] and dynamic range [0,255], W & H must match G output resolution
     mask: torch.Tensor, # [1,H,W] with 1 for known pixels and 0 for unknown pixels
     losses: dict, # {loss_fn: weight} where loss_fn is a function that takes (synth_images, target_images, masks) and returns a scalar loss
-    *,
+    device: torch.device,
     num_steps                  = 1000,
     w_avg_samples              = 10000,
-    initial_learning_rate      = 0.1,
-    initial_noise_factor       = 0.05,
-    lr_rampdown_length         = 0.25,
-    lr_rampup_length           = 0.05,
-    noise_ramp_length          = 0.75,
-    regularize_noise_weight    = 1e5,
+    learning_rate              = 0.1,
     verbose                    = False,
-    device: torch.device
+    visualize_progress         = True,  # Enable progress visualization
+    visualize_frequency        = 50     # Visualize every N steps
 ):
-    # Code adapted from /src/stylegan2/projector.py
 
     assert target.shape == (G.img_channels, G.img_resolution, G.img_resolution)
 
@@ -30,94 +34,108 @@ def project(
             print(*args)
 
     def get_total_loss(losses, synth_images, target_images, masks):
+        """
+        Get the total loss.
+        Loss functions should take in synth_images, target_images, and masks.
+        """
         total_loss = 0
         for loss_fn, weight in losses.items():
             loss = loss_fn(synth_images, target_images, masks)
             total_loss += loss * weight
 
         return total_loss
+    
+    def visualize_step(step, current_loss, synth_img, target_img, mask_img):
+        """
+        Visualize the current optimization progress
+        """
+        if not visualize_progress or step % visualize_frequency != 0:
+            return
+            
+        # Convert tensors to numpy for visualization
+        synth_img = (synth_img + .5) * 127.5
+        target_img = (target_img + .5) * 127.5
+        synth_np = synth_img.detach().cpu().numpy()[0].transpose(1, 2, 0).clip(0, 255).astype(np.uint8)
+        target_np = target_img[0].cpu().numpy().transpose(1, 2, 0).clip(0, 255).astype(np.uint8)
+        mask_np = mask_img[0].cpu().numpy().transpose(1, 2, 0).repeat(3, axis=2) * 255
+        
+        # Create a composite image showing masked target
+        masked_target = target_np * mask_np.astype(np.uint8) / 255
+        
+        plt.figure(figsize=(18, 6))
+        
+        plt.subplot(1, 3, 1)
+        plt.imshow(synth_np)
+        plt.title(f'Step {step}: Current Synthesis')
+        plt.axis('off')
+        
+        plt.subplot(1, 3, 2)
+        plt.imshow(masked_target.astype(np.uint8))
+        plt.title('Target (Masked)')
+        plt.axis('off')
+        
+        plt.subplot(1, 3, 3)
+        plt.imshow(target_np)
+        plt.title('Target (Full)')
+        plt.axis('off')
+        
+        plt.suptitle(f'Optimization Progress - Loss: {current_loss:.4f}')
+        
+        plt.tight_layout()
+                    
+        display(plt.gcf())
+        
 
+    G = copy.deepcopy(G).eval().requires_grad_(False).to(device) # type: ignore
 
-    # Uses unnecessary memory
-    # G = copy.deepcopy(G).eval().requires_grad_(False).to(device) # type: ignore
-    G = G.eval().requires_grad_(False).to(device)
-
-
-    # Compute w stats.
-    logprint(f'Computing W midpoint and stddev using {w_avg_samples} samples...')
-    z_samples = np.random.RandomState(123).randn(w_avg_samples, G.z_dim)
-    w_samples = G.mapping(torch.from_numpy(z_samples).to(device), None)  # [N, L, C]
-    w_samples = w_samples[:, :1, :].cpu().numpy().astype(np.float32)       # [N, 1, C]
-    w_avg = np.mean(w_samples, axis=0, keepdims=True)      # [1, 1, C]
-    w_std = (np.sum((w_samples - w_avg) ** 2) / w_avg_samples) ** 0.5
-
-    # Setup noise inputs.
-    noise_bufs = { name: buf for (name, buf) in G.synthesis.named_buffers() if 'noise_const' in name }
+    # Compute w_avg, the initial latent code for optimization.
+    z_samples = torch.randn(w_avg_samples, G.z_dim).to(device) # [N, Z]
+    w_samples = G.mapping(z_samples, None)  # [N, L, C]
+    w_avg = torch.mean(w_samples, axis=0, keepdims=True)      # [1, L, C]
 
     # Features for target image.
     target_images = target.unsqueeze(0).to(device).to(torch.float32)
     masks = mask.unsqueeze(0).to(device).to(torch.float32)
-    # if target_images.shape[2] > 256:
-    #     target_images = F.interpolate(target_images, size=(256, 256), mode='area')
 
-    w_opt = torch.tensor(w_avg, dtype=torch.float32, device=device, requires_grad=True) # pylint: disable=not-callable
-    w_out = torch.zeros([num_steps] + list(w_opt.shape[1:]), dtype=torch.float32, device=device)
-    optimizer = torch.optim.Adam([w_opt] + list(noise_bufs.values()), betas=(0.9, 0.999), lr=initial_learning_rate)
+    w_opt = torch.tensor(w_avg, dtype=torch.float32, device=device, requires_grad=True)
+    optimizer = torch.optim.Adam([w_opt], lr=learning_rate)
+    
+    try:
+        # Optimize latent code.
+        for step in range(num_steps):
 
-    # Init noise.
-    for buf in noise_bufs.values():
-        buf[:] = torch.randn_like(buf)
-        buf.requires_grad = True
+            # Generate images from w_opt.
+            # We temporarily disable the output stream to prevent
+            # the warnings in the generator from cluttering the logs.
+            sys.stdout = open('logs.txt', 'w')
 
-    for step in range(num_steps):
-        # Learning rate schedule.
-        t = step / num_steps
-        w_noise_scale = w_std * initial_noise_factor * max(0.0, 1.0 - t / noise_ramp_length) ** 2
-        lr_ramp = min(1.0, (1.0 - t) / lr_rampdown_length)
-        lr_ramp = 0.5 - 0.5 * np.cos(lr_ramp * np.pi)
-        lr_ramp = lr_ramp * min(1.0, t / lr_rampup_length)
-        lr = initial_learning_rate * lr_ramp
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr
+            # with autocast(device_type=device):
 
-        # Synth images from opt_w.
-        w_noise = torch.randn_like(w_opt) * w_noise_scale
-        ws = (w_opt + w_noise).repeat([1, G.mapping.num_ws, 1])
-        synth_images = G.synthesis(ws, noise_mode='const')
+            synth_images = G.synthesis(w_opt)
+            
+            # Re-enable stdout
+            sys.stdout = sys_stdout
 
-        # Downsample image to 256x256 if it's larger than that. VGG was built for 224x224 images.
-        synth_images = (synth_images + 1) * (255/2)
-        # if synth_images.shape[2] > 256:
-        #     synth_images = F.interpolate(synth_images, size=(256, 256), mode='area')
+            # Get the loss.
+            loss = get_total_loss(losses, synth_images, target_images, masks)
 
-        # Features for synth images.
-        dist = get_total_loss(losses, synth_images, target_images, masks)
+            # Step
+            optimizer.zero_grad()
+            scaler.scale(loss).backward()
+            torch.nn.utils.clip_grad_norm_([w_opt], max_norm=1.0)
+            scaler.step(optimizer)
+            scaler.update()
+            logprint(f'step {step+1:>4d}/{num_steps}: loss {float(loss):<5.4f}')
+            
+            # Visualize progress
+            visualize_step(step+1, float(loss), synth_images, target_images, masks)
 
-        # Noise regularization.
-        reg_loss = 0.0
-        for v in noise_bufs.values():
-            noise = v[None,None,:,:] # must be [1,1,H,W] for F.avg_pool2d()
-            while True:
-                reg_loss += (noise*torch.roll(noise, shifts=1, dims=3)).mean()**2
-                reg_loss += (noise*torch.roll(noise, shifts=1, dims=2)).mean()**2
-                if noise.shape[2] <= 8:
-                    break
-                noise = F.avg_pool2d(noise, kernel_size=2)
-        loss = dist + reg_loss * regularize_noise_weight
+    except KeyboardInterrupt:
+        logprint('Interrupted')
+        
 
-        # Step
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        optimizer.step()
-        logprint(f'step {step+1:>4d}/{num_steps}: dist {dist:<4.2f} loss {float(loss):<5.2f}')
+    # Final visualization
+    visualize_step(num_steps, float(loss), synth_images, target_images, masks)
+    
 
-        # Save projected W for each optimization step.
-        w_out[step] = w_opt.detach()[0]
-
-        # Normalize noise.
-        with torch.no_grad():
-            for buf in noise_bufs.values():
-                buf -= buf.mean()
-                buf *= buf.square().mean().rsqrt()
-
-    return w_out.repeat([1, G.mapping.num_ws, 1])
+    return w_opt.detach().cpu().numpy(), synth_images.detach().cpu().numpy()
