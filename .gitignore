@@ -1,1 +1,4 @@
 models/stylegan2/ffhq.pkl
+outputs/
+output/
+multirun/

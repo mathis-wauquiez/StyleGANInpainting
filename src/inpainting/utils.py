@@ -20,3 +20,8 @@ def get_stylegan_generator():
     with open('models/stylegan2/ffhq.pkl', 'rb') as f:
         G = pickle.load(f)['G_ema'].cuda()
     return G
+
+def get_stylegan_discriminator():
+    with open('models/stylegan2/ffhq.pkl', 'rb') as f:
+        D = pickle.load(f)['D'].cuda()
+    return D

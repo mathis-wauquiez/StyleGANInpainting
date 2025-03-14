@@ -12,10 +12,18 @@ sys_stdout = sys.stdout
 scaler = GradScaler()
 
 
+from .losses import lpips_loss, attachment_loss, CLIP, DiscriminatorLoss
+
+losses_dict = {
+    'lpips': lpips_loss,
+    'mse': attachment_loss,
+}
+
+
 
 def project(
     G,
-    target: torch.Tensor, # [C,H,W] and dynamic range [0,255], W & H must match G output resolution
+    target: torch.Tensor, # [C,H,W] and dynamic range [-1,2515], W & H must match G output resolution
     mask: torch.Tensor, # [1,H,W] with 1 for known pixels and 0 for unknown pixels
     losses: dict, # {loss_fn: weight} where loss_fn is a function that takes (synth_images, target_images, masks) and returns a scalar loss
     device: torch.device,
@@ -24,7 +32,8 @@ def project(
     learning_rate              = 0.1,
     verbose                    = False,
     visualize_progress         = True,  # Enable progress visualization
-    visualize_frequency        = 50     # Visualize every N steps
+    visualize_frequency        = 50,     # Visualize every N stepsi
+    use_encoder                = False,  # Use encoder to optimize w
 ):
 
     assert target.shape == (G.img_channels, G.img_resolution, G.img_resolution)
@@ -39,7 +48,25 @@ def project(
         Loss functions should take in synth_images, target_images, and masks.
         """
         total_loss = 0
+        from omegaconf.listconfig import ListConfig
+        if type(losses) == ListConfig:
+            losses_ = {}
+            for loss_dict in losses:
+                losses_.update(loss_dict)
+            losses = losses_
+
         for loss_fn, weight in losses.items():
+            if type(loss_fn) == str:
+                if loss_fn == 'clip':
+                    args = dict(weight)
+                    weight = args.pop('weight')
+                    loss_fn = CLIP(caption=args.pop('caption'), model=args.pop('model'), device=device)
+                elif loss_fn == 'disc':
+                    loss_fn = DiscriminatorLoss(device=device)
+                else:
+
+                    loss_fn = losses_dict[loss_fn]
+
             loss = loss_fn(synth_images, target_images, masks)
             total_loss += loss * weight
 

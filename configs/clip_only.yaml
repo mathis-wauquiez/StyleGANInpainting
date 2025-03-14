@@ -1,0 +1,18 @@
+# YAML config file for StyleGAN2-ADA inversion
+
+seed: null
+image_path: data/pairs/sample_0_image.png
+mask_path: data/pairs/sample_0_mask.png
+save_folder: output/clip_only/sample_0
+
+losses:
+  - clip:
+      model: RN101
+      weight: 1
+      caption: A close-up portrait of a young woman with long wavy red hair smiles warmly at the camera. She has bright hazel eyes, well-groomed eyebrows, and sunglasses. She wears green stud earrings and subtle makeup.
+  - disc: 0.1
+
+verbose: true
+device: cuda
+num_steps: 100
+learning_rate: 0.005

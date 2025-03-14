@@ -1,0 +1,25 @@
+# YAML config file for StyleGAN2-ADA inversion
+
+seed: null
+image_path: data/pairs/sample_0_image.png
+mask_path: data/pairs/sample_0_mask.png
+save_folder: output/inversion_caption/sample_0
+
+losses:
+  - mse: 1
+  - lpips: 1
+  - clip:
+      model: ViT-B/32
+      weight: 0.05
+      caption: ??
+
+verbose: true
+device: cuda
+num_steps: 100
+learning_rate: 0.1
+
+hydra:
+  mode: MULTIRUN
+  sweeper:
+    params:
+      losses.2.clip.caption: A close-up portrait of a young woman wearing sunglasses., A woman wearing glasses., Someone wearing fancy glasses., A young woman with long wavy red hair smiles warmly at the camera. She has bright hazel eyes well-groomed eyebrows and sunglasses. She wears green stud earrings and subtle makeup.
