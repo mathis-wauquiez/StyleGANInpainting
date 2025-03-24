@@ -6,14 +6,19 @@ mask_path: data/pairs/sample_0_mask.png
 save_folder: output/classifier_guided/sample_0
 
 losses:
-  - disc: 0.1
+  - mse: 0.4
   - lpips: 1
   - classification:
       class_index: 2
       target: 1
-      weight: 1
+      weight: 0.1
 
 verbose: true
 device: cuda
 num_steps: 100
-learning_rate: 0.005
+learning_rate: 0.1
+
+scheduler:
+  _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+  T_max: ${num_steps}
+  eta_min: 0.001

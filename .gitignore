@@ -6,3 +6,6 @@ trash
 /src/classifier
 *.pyc
 *.pyc
+*.pyc
+*.pyc
+logs.txt

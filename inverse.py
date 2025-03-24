@@ -101,6 +101,11 @@ def main(cfg):
     mask = transform(mask)
     mask = (~(mask > 0.5)).float()
 
+    scheduler = cfg.scheduler if hasattr(cfg, 'scheduler') else None
+    # # load
+    # if scheduler is not None:
+    #     scheduler = hydra.utils.instantiate(scheduler)
+
     # Inversion
 
     w, synths = project(
@@ -111,8 +116,9 @@ def main(cfg):
         device=device,
         verbose=verbose,
         num_steps=num_steps,
-        learning_rate=cfg.learning_rate,
-        visualize_progress=False
+        learning_rate=cfg.learning_rate if hasattr(cfg, 'learning_rate') else None,
+        visualize_progress=False,
+        scheduler=scheduler
     )
 
     generated_image = (synths[0].clip(-1, 1)*127.5 + 127.5).transpose((1, 2, 0)).astype('uint8')

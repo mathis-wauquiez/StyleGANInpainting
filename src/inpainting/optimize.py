@@ -7,7 +7,7 @@ from IPython.display import clear_output, display
 
 from torch.amp import autocast, GradScaler
 import sys
-
+from tqdm import tqdm
 from .optimize_utils import get_criterion
 
 import warnings
@@ -34,11 +34,12 @@ def project(
     device: torch.device,
     num_steps                  = 1000,
     w_avg_samples              = 10000,
-    learning_rate              = 0.1,
+    learning_rate              = None,
     verbose                    = False,
     visualize_progress         = True,  # Enable progress visualization
     visualize_frequency        = 50,     # Visualize every N stepsi
     use_encoder                = False,  # Use encoder to optimize w
+    scheduler                  = None,   # Learning rate scheduler
 ):
 
     assert target.shape == (G.img_channels, G.img_resolution, G.img_resolution)
@@ -100,40 +101,46 @@ def project(
     masks = mask.unsqueeze(0).to(device).to(torch.float32)
 
     w_opt = torch.tensor(w_avg, dtype=torch.float32, device=device, requires_grad=True)
-    optimizer = torch.optim.Adam([w_opt], lr=learning_rate)
+    
+    optimizer = torch.optim.Adam([w_opt], lr=learning_rate, betas=(0.9, 0.999), eps=1e-8)
+
+    if scheduler is not None:
+        print(scheduler)
+        from hydra.utils import instantiate
+        scheduler = instantiate(scheduler, optimizer=optimizer)
 
     criterion = get_criterion(losses, device=device)
     
     try:
         # Optimize latent code.
-        for step in range(num_steps):
+        with tqdm(total=num_steps, desc="Optimization", dynamic_ncols=True) as pbar:
+            for step in range(num_steps):
 
-            # Generate images from w_opt.
-            # We temporarily disable the output stream to prevent
-            # the warnings in the generator from cluttering the logs.
-            sys.stdout = open('logs.txt', 'w')
+                # Temporarily disable stdout to suppress generator warnings
+                sys.stdout = open('logs.txt', 'w')
 
-            # with autocast(device_type=device):
+                # Generate images
+                synth_images = G.synthesis(w_opt)
 
-            synth_images = G.synthesis(w_opt)
-            
-            # Re-enable stdout
-            sys.stdout = sys_stdout
+                # Re-enable stdout
+                sys.stdout = sys_stdout
 
-            # Get the loss.
-            # loss = get_total_loss(losses, synth_images, target_images, masks, device=device)
-            loss = criterion(synth_images, target_images, masks)
+                # Compute loss
+                loss = criterion(synth_images, target_images, masks)
 
-            # Step
-            optimizer.zero_grad()
-            scaler.scale(loss).backward()
-            torch.nn.utils.clip_grad_norm_([w_opt], max_norm=1.0)
-            scaler.step(optimizer)
-            scaler.update()
-            logprint(f'step {step+1:>4d}/{num_steps}: loss {float(loss):<5.4f}')
-            
-            # Visualize progress
-            visualize_step(step+1, float(loss), synth_images, target_images, masks)
+                # Step
+                optimizer.zero_grad()
+                scaler.scale(loss).backward()
+                torch.nn.utils.clip_grad_norm_([w_opt], max_norm=1.0)
+                scaler.step(optimizer)
+                scaler.update()
+
+                # Update tqdm bar with loss value
+                pbar.set_postfix(loss=f"{float(loss):.4f}")
+                pbar.update(1)
+                
+                # Visualize progress
+                visualize_step(step+1, float(loss), synth_images, target_images, masks)
 
     except KeyboardInterrupt:
         logprint('Interrupted - Saving progress...')

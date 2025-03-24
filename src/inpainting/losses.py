@@ -215,7 +215,7 @@ class ClassifierLoss:
             synth = synth.unsqueeze(0)
 
         # Normalize to [0,1] range
-        synth = _stylegan2_to_01(synth).clamp(0, 1)
+        synth = _stylegan2_to_01(synth).clamp(1e-3, 1-1e-3)
 
         # Get classifier predictions (logits)
         preds = self.model(synth)  # Shape: (batch_size, num_classes)
