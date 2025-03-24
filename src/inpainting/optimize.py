@@ -7,6 +7,12 @@ from IPython.display import clear_output, display
 
 from torch.amp import autocast, GradScaler
 import sys
+
+from .optimize_utils import get_criterion
+
+import warnings
+warnings.filterwarnings("ignore")
+
 sys_stdout = sys.stdout
 
 scaler = GradScaler()
@@ -18,7 +24,6 @@ losses_dict = {
     'lpips': lpips_loss,
     'mse': attachment_loss,
 }
-
 
 
 def project(
@@ -42,36 +47,6 @@ def project(
         if verbose:
             print(*args)
 
-    def get_total_loss(losses, synth_images, target_images, masks):
-        """
-        Get the total loss.
-        Loss functions should take in synth_images, target_images, and masks.
-        """
-        total_loss = 0
-        from omegaconf.listconfig import ListConfig
-        if type(losses) == ListConfig:
-            losses_ = {}
-            for loss_dict in losses:
-                losses_.update(loss_dict)
-            losses = losses_
-
-        for loss_fn, weight in losses.items():
-            if type(loss_fn) == str:
-                if loss_fn == 'clip':
-                    args = dict(weight)
-                    weight = args.pop('weight')
-                    loss_fn = CLIP(caption=args.pop('caption'), model=args.pop('model'), device=device)
-                elif loss_fn == 'disc':
-                    loss_fn = DiscriminatorLoss(device=device)
-                else:
-
-                    loss_fn = losses_dict[loss_fn]
-
-            loss = loss_fn(synth_images, target_images, masks)
-            total_loss += loss * weight
-
-        return total_loss
-    
     def visualize_step(step, current_loss, synth_img, target_img, mask_img):
         """
         Visualize the current optimization progress
@@ -126,6 +101,8 @@ def project(
 
     w_opt = torch.tensor(w_avg, dtype=torch.float32, device=device, requires_grad=True)
     optimizer = torch.optim.Adam([w_opt], lr=learning_rate)
+
+    criterion = get_criterion(losses, device=device)
     
     try:
         # Optimize latent code.
@@ -144,7 +121,8 @@ def project(
             sys.stdout = sys_stdout
 
             # Get the loss.
-            loss = get_total_loss(losses, synth_images, target_images, masks)
+            # loss = get_total_loss(losses, synth_images, target_images, masks, device=device)
+            loss = criterion(synth_images, target_images, masks)
 
             # Step
             optimizer.zero_grad()
@@ -158,8 +136,7 @@ def project(
             visualize_step(step+1, float(loss), synth_images, target_images, masks)
 
     except KeyboardInterrupt:
-        logprint('Interrupted')
-        
+        logprint('Interrupted - Saving progress...')
 
     # Final visualization
     visualize_step(num_steps, float(loss), synth_images, target_images, masks)

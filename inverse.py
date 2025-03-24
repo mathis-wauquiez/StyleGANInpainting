@@ -1,3 +1,13 @@
+#
+# Python script to inverse an image using StyleGAN2.
+# The user can specify the image and mask paths, the seed, the losses, the device, and the number of steps.
+# Example configurations are provided in the configs directory.
+#
+# Usage example:
+# python inverse.py config-path=path/to/config.yaml
+
+
+
 import sys
 import os
 from pathlib import Path

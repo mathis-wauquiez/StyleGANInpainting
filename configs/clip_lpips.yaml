@@ -3,9 +3,10 @@
 seed: null
 image_path: data/pairs/sample_0_image.png
 mask_path: data/pairs/sample_0_mask.png
-save_folder: output/clip_only/sample_0
+save_folder: output/clip_lpips/sample_0
 
 losses:
+  - mse: 0.4
   - lpips: 1
   - clip:
       model: RN101
@@ -15,5 +16,5 @@ losses:
 
 verbose: true
 device: cuda
-num_steps: 100
-learning_rate: 0.005
+num_steps: 250
+learning_rate: 0.1

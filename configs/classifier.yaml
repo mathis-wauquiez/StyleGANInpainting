@@ -1,0 +1,19 @@
+# YAML config file for StyleGAN2-ADA inversion
+
+seed: null
+image_path: data/pairs/sample_0_image.png
+mask_path: data/pairs/sample_0_mask.png
+save_folder: output/classifier_guided/sample_0
+
+losses:
+  - disc: 0.1
+  - lpips: 1
+  - classification:
+      class_index: 2
+      target: 1
+      weight: 1
+
+verbose: true
+device: cuda
+num_steps: 100
+learning_rate: 0.005
