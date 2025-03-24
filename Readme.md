@@ -2,8 +2,8 @@
 
 The goal of this project is to use StyleGAN to do image inpainting.
 
-More precisely, we use StyleGAN2-Ada to make the inpaiting. The first idea consists in finding a latent code compatible with the parts of the image we can observe: $$w^* = \argmin\limits_w \| (x - G(w))\odot(1-M)\|^2_2$$
-This problem is solved through gradient descent on the latent code $w$, with an initialization that is either random or given by an encoder.
+More precisely, we use StyleGAN2-Ada to make the inpaiting. The first idea consists in finding a latent code compatible with the parts of the image we can observe: $$w^* = \text{arg}\min\limits_w \| (x - G(w))\odot(1-M)\|^2_2$$
+This problem is solved through gradient descent on the latent code $w$, with an initialization that is either random or given by an encoder. Alternatives are to use a different optimization algorithm, such as $\texttt{Adam}$ or $\texttt{L-BFGS}$
 
 We will look wether or not the model will produce something realistic inside the region, and wether or not it is robust to small variations.
 
@@ -20,3 +20,5 @@ More on CLIP: CLIP is made of two neural networks. The first is the textual enco
 **Technical details**:
 
 - The implementation of StyleGAN2 is directly downloaded from [this repository](https://github.com/NVlabs/stylegan2-ada-pytorch). Unfortunately, this code is copyrighted, and we invite the users to download it by themselves, as otherwise the authors of this repository would violate the copyrights.
+
+- I cannot share the code or weights for the classifier I used.
