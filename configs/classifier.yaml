@@ -3,22 +3,33 @@
 seed: null
 image_path: data/pairs/sample_0_image.png
 mask_path: data/pairs/sample_0_mask.png
-save_folder: output/classifier_guided/sample_0
+save_folder: output/1_lpips_mse_inversion/sample_0
 
 losses:
-  - mse: 0.4
-  - lpips: 1
-  - classification:
-      class_index: 2
-      target: 1
-      weight: 0.1
 
+  # disc: 0.5
+
+  # classification:
+  #   class_index: 31 # see src/classifier/constant.py for class names
+  #   target: 0
+  #   margin: 0.5
+  #   weight: 0.05
+  
+  # clip:
+  #   model: RN101
+  #   weight: 0.3
+  #   caption: A woman with a serious expression, not smiling
+
+
+  mse: 0.4
+  lpips: 1
+
+  # w2: 0.5
+
+  
+
+visualize_progress: true
 verbose: true
 device: cuda
 num_steps: 100
-learning_rate: 0.1
-
-scheduler:
-  _target_: torch.optim.lr_scheduler.CosineAnnealingLR
-  T_max: ${num_steps}
-  eta_min: 0.001
+learning_rate: 0.005

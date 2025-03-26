@@ -117,7 +117,7 @@ def main(cfg):
         verbose=verbose,
         num_steps=num_steps,
         learning_rate=cfg.learning_rate if hasattr(cfg, 'learning_rate') else None,
-        visualize_progress=False,
+        visualize_progress=cfg.visualize_progress if hasattr(cfg, 'visualize_progress') else False,
         scheduler=scheduler
     )
 
@@ -153,5 +153,20 @@ def main(cfg):
     with open(save_folder / 'logs.txt', 'a') as f:
         f.write(f'{image_name}_{seed}_{num_steps}: {time_taken}\n')
 
+    # open it in vscode
+    os.system(f"code {save_folder / f'image_{image_name}_{seed}_{num_steps}.png'}")
+
 if __name__ == "__main__":
     main()
+    # Notify using a message
+    print("Done!")
+    from win10toast import ToastNotifier
+    toast = ToastNotifier()
+    toast.show_toast(
+        "Code is done!",
+        "Check the results.",
+        duration = 3,
+        threaded = True,
+        )
+
+

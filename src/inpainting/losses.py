@@ -68,6 +68,11 @@ def lpips_loss(x, y, mask):
     loss = loss.mean()
     return loss
 
+def _convert_image_to_rgb(image):
+    return image.convert("RGB")
+
+from torchvision.transforms import InterpolationMode
+BICUBIC = InterpolationMode.BICUBIC
 
 class CLIP:
     """
@@ -81,7 +86,10 @@ class CLIP:
         self.model.eval()  # Set the model to evaluation mode
 
         # Modified from clip/clip.py:_transform
-        self.preprocess = transforms.Compose([
+        from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor
+        self.preprocess = Compose([
+            Resize(224, interpolation=BICUBIC),
+            CenterCrop(224),
             Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
         ])
 
@@ -177,13 +185,15 @@ class DiscriminatorLoss:
     
 
 
+
+from classifier.classification import get_classifier
 class ClassifierLoss:
     """
     A wrapper around the classifier that computes the classifier loss
     for a specific class.
     """
 
-    def __init__(self, class_index, value, device='cuda'):
+    def __init__(self, class_index, value, margin, device='cuda'):
         """
         Args:
             class_index (int): The target class index.
@@ -194,9 +204,21 @@ class ClassifierLoss:
 
         self.device = device
         self.class_index = class_index
+        self.margin = margin
         self.target_value = float(value)  # Ensure it's a float for loss computation
-        self.model = ClassifierWrapper().to(device)
+        self.model = get_classifier().to(device)
         self.model.eval()  # Set the model to evaluation mode
+
+        mean = [0.485, 0.456, 0.406] # from the repo of the classifier - normalize
+        std = [0.229, 0.224, 0.225]
+
+        self.transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            # transforms.ToTensor(),
+            transforms.Normalize(mean, std),
+        ])
+
+
 
     def __call__(self, synth, target_images, masks):
         """
@@ -216,6 +238,7 @@ class ClassifierLoss:
 
         # Normalize to [0,1] range
         synth = _stylegan2_to_01(synth).clamp(1e-3, 1-1e-3)
+        synth = self.transform(synth)
 
         # Get classifier predictions (logits)
         preds = self.model(synth)  # Shape: (batch_size, num_classes)
@@ -226,5 +249,8 @@ class ClassifierLoss:
         # Compute binary cross-entropy loss
         target_probs = torch.full_like(class_logits, self.target_value, device=self.device)
         loss = F.binary_cross_entropy_with_logits(class_logits, target_probs)
+
+        # Compute the LogSumExp estimation of max(loss, margin)
+        loss = torch.log(np.exp(self.margin) + torch.exp(loss))
 
         return loss

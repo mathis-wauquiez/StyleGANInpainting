@@ -2,9 +2,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import copy
-import matplotlib.pyplot as plt
 from IPython.display import clear_output, display
-
+in_notebook = False
 from torch.amp import autocast, GradScaler
 import sys
 from tqdm import tqdm
@@ -12,6 +11,10 @@ from .optimize_utils import get_criterion
 
 import warnings
 warnings.filterwarnings("ignore")
+
+import matplotlib
+matplotlib.use('TkAgg')  # or 'Qt5Agg' 
+import matplotlib.pyplot as plt
 
 sys_stdout = sys.stdout
 
@@ -37,10 +40,28 @@ def project(
     learning_rate              = None,
     verbose                    = False,
     visualize_progress         = True,  # Enable progress visualization
-    visualize_frequency        = 50,     # Visualize every N stepsi
+    visualize_frequency        = 1,     # Visualize every N stepsi
     use_encoder                = False,  # Use encoder to optimize w
     scheduler                  = None,   # Learning rate scheduler
 ):
+
+
+    if visualize_progress:
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        img_synth = axes[0].imshow(np.zeros((256, 256, 3), dtype=np.uint8))
+        img_masked_target = axes[1].imshow(np.zeros((256, 256, 3), dtype=np.uint8))
+        img_target = axes[2].imshow(np.zeros((256, 256, 3), dtype=np.uint8))
+
+        axes[0].set_title('Step: - Current Synthesis')
+        axes[1].set_title('Target (Masked)')
+        axes[2].set_title('Target (Full)')
+
+        for ax in axes:
+            ax.axis('off')
+
+        plt.ion()  # Interactive mode
+        plt.tight_layout()
+        plt.show(block=False)  # Show the figure non-blockingly
 
     assert target.shape == (G.img_channels, G.img_resolution, G.img_resolution)
 
@@ -54,40 +75,31 @@ def project(
         """
         if not visualize_progress or step % visualize_frequency != 0:
             return
-            
+
         # Convert tensors to numpy for visualization
-        synth_img = (synth_img + .5) * 127.5
-        target_img = (target_img + .5) * 127.5
+        synth_img = (synth_img + 0.5) * 127.5
+        target_img = (target_img + 0.5) * 127.5
         synth_np = synth_img.detach().cpu().numpy()[0].transpose(1, 2, 0).clip(0, 255).astype(np.uint8)
         target_np = target_img[0].cpu().numpy().transpose(1, 2, 0).clip(0, 255).astype(np.uint8)
         mask_np = mask_img[0].cpu().numpy().transpose(1, 2, 0).repeat(3, axis=2) * 255
-        
+
         # Create a composite image showing masked target
-        masked_target = target_np * mask_np.astype(np.uint8) / 255
-        
-        plt.figure(figsize=(18, 6))
-        
-        plt.subplot(1, 3, 1)
-        plt.imshow(synth_np)
-        plt.title(f'Step {step}: Current Synthesis')
-        plt.axis('off')
-        
-        plt.subplot(1, 3, 2)
-        plt.imshow(masked_target.astype(np.uint8))
-        plt.title('Target (Masked)')
-        plt.axis('off')
-        
-        plt.subplot(1, 3, 3)
-        plt.imshow(target_np)
-        plt.title('Target (Full)')
-        plt.axis('off')
-        
-        plt.suptitle(f'Optimization Progress - Loss: {current_loss:.4f}')
-        
-        plt.tight_layout()
-                    
-        display(plt.gcf())
-        
+        masked_target = (target_np * (mask_np.astype(float)/255).astype(np.uint8)).astype(np.uint8)
+
+        # Mise à jour des images affichées
+        img_synth.set_data(synth_np)
+        img_masked_target.set_data(masked_target)
+        img_target.set_data(target_np)
+
+        # Update titles
+        axes[0].set_title(f'Step {step}: Current Synthesis')
+        fig.suptitle(f'Optimization Progress - Loss: {current_loss:.4f}')
+
+        # Redraw the figure and force update
+        fig.canvas.draw_idle()  # redraw the figure
+        fig.canvas.flush_events()  # process GUI events
+        plt.pause(0.01)  # small pause to update
+
 
     G = copy.deepcopy(G).eval().requires_grad_(False).to(device) # type: ignore
 
@@ -127,6 +139,8 @@ def project(
 
                 # Compute loss
                 loss = criterion(synth_images, target_images, masks)
+                if 'w2' in losses:
+                    loss += losses['w2'] * F.mse_loss(w_opt, w_avg)
 
                 # Step
                 optimizer.zero_grad()
@@ -142,11 +156,19 @@ def project(
                 # Visualize progress
                 visualize_step(step+1, float(loss), synth_images, target_images, masks)
 
+                if scheduler is not None:
+                    scheduler.step()
+
+
     except KeyboardInterrupt:
         logprint('Interrupted - Saving progress...')
 
+    plt.ioff()  # Disable interactive mode
+    # plt.show(block=True)  # Keep the final figure open
+
     # Final visualization
     visualize_step(num_steps, float(loss), synth_images, target_images, masks)
+    plt.show()
     
 
     return w_opt.detach().cpu().numpy(), synth_images.detach().cpu().numpy()
